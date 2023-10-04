@@ -1,4 +1,5 @@
 import os
+import time
 import multiprocessing as mp
 from concurrent.futures.thread import ThreadPoolExecutor
 
@@ -59,11 +60,19 @@ def run():
     stats = neat.StatisticsReporter()
     p.add_reporter(stats)
 
+    timestamp = int(time.time())
+    os.makedirs(f'checkpoints/{timestamp}', exist_ok=True)
+    checkpointer = neat.Checkpointer(generation_interval=10, filename_prefix=f'checkpoints/{timestamp}/neat_pop_')
+
+    p.add_reporter(checkpointer)
+
     if MULTITHREADING:
         print(f'### Using {cores} cpu cores for multithreading')
         winner = p.run(eval_genomes_async, NUM_GENERATIONS)
     else:
         winner = p.run(eval_genomes, NUM_GENERATIONS)
+
+    checkpointer.save_checkpoint(config, p, neat.DefaultSpeciesSet, p.generation)
 
     print('\nBest genome:\n{!s}'.format(winner))
 
