@@ -1,7 +1,7 @@
 import os
 import warnings
 import pandas as pd
-from keras import optimizers
+import keras.optimizers.legacy as optimizers
 from keras.models import Sequential
 from keras.layers import Flatten, Dense, Dropout
 
@@ -121,9 +121,11 @@ class MLPGenerator(MLPSearchSpace):
                     if config_ids[j] == bigram_ids[i]:
                         search_index.append(i)
                 if len(search_index) == 0:
-                    self.shared_weights = self.shared_weights.append({'bigram_id': config_ids[j],
-                                                                      'weights': layer.get_weights()},
-                                                                     ignore_index=True)
+                    # self.shared_weights = self.shared_weights.concat({'bigram_id': config_ids[j],
+                    #                                                   'weights': layer.get_weights()},
+                    #                                                  ignore_index=True)
+                    self.shared_weights = pd.concat([self.shared_weights, pd.DataFrame({'bigram_id': config_ids[j],
+                                                                      'weights': layer.get_weights()})], ignore_index=True)
                 else:
                     self.shared_weights.at[search_index[0], 'weights'] = layer.get_weights()
                 j += 1

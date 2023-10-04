@@ -1,9 +1,10 @@
 import os
 import numpy as np
-from keras import optimizers
+import keras.optimizers.legacy as optimizers
 from keras.layers import Dense, LSTM
 from keras.models import Model
-from keras.engine.input_layer import Input
+# from keras.engine.input_layer import Input
+from keras.layers import Input
 from keras.preprocessing.sequence import pad_sequences
 
 from mlp_generator import MLPSearchSpace
@@ -90,7 +91,8 @@ class Controller(MLPSearchSpace):
         model.save_weights(self.controller_weights)
 
     def hybrid_control_model(self, controller_input_shape, controller_batch_size):
-        main_input = Input(shape=controller_input_shape, batch_shape=controller_batch_size, name='main_input')
+        # main_input = Input(shape=controller_input_shape, batch_shape=controller_batch_size, name='main_input')
+        main_input = Input(shape=controller_input_shape, name='main_input')
         x = LSTM(self.controller_lstm_dim, return_sequences=True)(main_input)
         predictor_output = Dense(1, activation='sigmoid', name='predictor_output')(x)
         main_output = Dense(self.controller_classes, activation='softmax', name='main_output')(x)
