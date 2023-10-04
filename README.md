@@ -4,3 +4,5 @@
 `pip install mnist`
 
 `pip install scikit-learn`
+
+`pip install matplotlib`

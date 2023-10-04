@@ -1,37 +1,33 @@
 import os
 import time
-import multiprocessing as mp
 from concurrent.futures.thread import ThreadPoolExecutor
 
-import neat  # pip install neat-python
-import mnist  # pip install mnist
+import neat                        # pip install neat-python
+import mnist                       # pip install mnist
 from sklearn.utils import shuffle  # pip install scikit-learn
+import matplotlib
+import matplotlib.pyplot as plt    # pip install matplotlib
 
 ##### SETTINGS #####
-MULTITHREADING = True           # *can* increase speed but probably uses more cpu power (will use all cores by default!)
-NUM_GENERATIONS = 300           # maximum number of generations to run, if target fitness is not reached before
-NUM_SAMPLES = 2000              # how many images to test each network on
-CONFIG_FILEPATH = 'config.cfg'  # relative to cwd
+MULTITHREADING: bool = True          # *can* increase speed but will use all cores by default!
+NUM_GENERATIONS: int = 300           # maximum number of generations to run, if target fitness is not reached before
+NUM_SAMPLES: int = 2000              # how many images to test each network on
+RESAMPLE: bool = False               # whether to resample NUM_SAMPLES items from the dataset every generation
+CONFIG_FILEPATH: str = 'config.cfg'  # relative to cwd
 ####################
-
-cores = mp.cpu_count()
-
-config_path = os.path.join(os.path.dirname(__file__), CONFIG_FILEPATH)
-
-x, y = shuffle(mnist.test_images(), mnist.test_labels(), n_samples=NUM_SAMPLES)  # TODO resample each generation?
-total = len(y)
-xy = []
-for xii, yii in zip(x, y):
-    xy.append((xii.flatten(), yii))
 
 
 def eval_genomes(genomes, config):
+    if RESAMPLE:
+        prep_dataset()
     for genome_id, genome in genomes:
         eval_genome(genome, config)
 
 
 def eval_genomes_async(genomes, config):
-    with ThreadPoolExecutor(max_workers=cores) as executor:
+    if RESAMPLE:
+        prep_dataset()
+    with ThreadPoolExecutor() as executor:
         for genome_id, genome in genomes:
             executor.submit(eval_genome, genome, config)
 
@@ -49,10 +45,62 @@ def eval_genome(genome, config):
     genome.fitness = correct / total
 
 
+def prep_dataset():
+    global xy, total
+    x, y = shuffle(mnist.test_images(), mnist.test_labels(), n_samples=NUM_SAMPLES)
+    total = len(y)
+    xy = []
+    for xi, yi in zip(x, y):
+        xy.append((xi.flatten(), yi))
+
+
+def plot_mnist(x, y, pred=None, cols=5):
+    matplotlib.use('TkAgg')  # temp fix for Pycharm
+    rows = round((len(y)/cols)+0.5)
+    fig, axes = plt.subplots(rows, cols, figsize=(15, 15))
+    for i, ax in enumerate(fig.axes):
+        print(x[i].shape)
+        ax.imshow(x[i], cmap='gray_r')
+        ax.set_title(f'Pred: {pred[i] if pred else "n/a"} - True: {y[i]}')
+        # ax.set_axis_off()
+        ax.set_xticks([])
+        ax.set_yticks([])
+    plt.tight_layout()
+    plt.show()
+
+
+class Classifier:
+    def __init__(self, genome, config):
+        self.net = neat.nn.FeedForwardNetwork.create(genome, config)
+
+    def __call__(self, inputs):
+        if isinstance(inputs, list):
+            res = []
+            for array in inputs:
+                output = self.net.activate(array)
+                res.append(output.index(max(output)))
+            return res
+        else:
+            output = self.net.activate(inputs)
+            return output.index(max(output))
+
+    @classmethod
+    def from_checkpoint(cls, filename, config):
+        genome = neat.Checkpointer().restore_checkpoint(filename).best_genome
+        if genome:
+            return cls(genome, config)
+        else:
+            print(f'WARNING: checkpoint "{filename}" does not have a best_genome, picking random one')
+            genome = list(neat.Checkpointer().restore_checkpoint(filename).population.values())[0]
+            return cls(genome, config)
+
+
 def run():
+    prep_dataset()
+
     config = neat.Config(neat.DefaultGenome, neat.DefaultReproduction,
                          neat.DefaultSpeciesSet, neat.DefaultStagnation,
-                         config_path)
+                         os.path.join(os.path.dirname(__file__), CONFIG_FILEPATH))
 
     p = neat.Population(config)
 
@@ -67,7 +115,7 @@ def run():
     p.add_reporter(checkpointer)
 
     if MULTITHREADING:
-        print(f'### Using {cores} cpu cores for multithreading')
+        print(f'### Using {os.cpu_count()} cpu cores for multithreading')
         winner = p.run(eval_genomes_async, NUM_GENERATIONS)
     else:
         winner = p.run(eval_genomes, NUM_GENERATIONS)
@@ -76,13 +124,16 @@ def run():
 
     print('\nBest genome:\n{!s}'.format(winner))
 
-    # TODO
-    # Show output of the most fit genome against training data.
-    # print('\nOutput:')
-    # winner_net = neat.nn.FeedForwardNetwork.create(winner, config)
-    # for xi, yi in xy:
-    #     output = winner_net.activate(xi)
-    #     print("expected output {!r}, got {!r}".format(xi, yi, output))
+    # Show output of the most fit genome against test data.
+    winner_clf = Classifier(winner, config)
+    x = []
+    y = []
+    for xi, yi in xy[:20]:
+        x.append(xi.reshape(28, 28))
+        y.append(yi)
+        output = winner_clf(xi)
+        print("expected output {!r}, got {!r}".format(yi, output))
+    plot_mnist(x, y, winner_clf(x))
 
 
 if __name__ == '__main__':
