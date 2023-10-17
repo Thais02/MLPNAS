@@ -1,6 +1,6 @@
 import os
 import time
-from concurrent.futures.thread import ThreadPoolExecutor
+from functools import partial
 
 import neat                        # pip install neat-python
 import mnist                       # pip install mnist
@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt    # pip install matplotlib
 
 ##### SETTINGS #####
 MULTITHREADING: bool = True          # *can* increase speed but will use all cores by default!
-NUM_GENERATIONS: int = 300           # maximum number of generations to run, if target fitness is not reached before
+NUM_GENERATIONS: int = 4096          # maximum number of generations to run, if target fitness is not reached before
 NUM_SAMPLES: int = 2000              # how many images to test each network on
 RESAMPLE: bool = False               # whether to resample NUM_SAMPLES items from the dataset every generation
 CONFIG_FILEPATH: str = 'config.cfg'  # relative to cwd
@@ -27,9 +27,7 @@ def eval_genomes(genomes, config):
 def eval_genomes_async(genomes, config):
     if RESAMPLE:
         prep_dataset()
-    with ThreadPoolExecutor() as executor:
-        for genome_id, genome in genomes:
-            executor.submit(eval_genome, genome, config)
+    evaluator.evaluate(genomes, config)
 
 
 def eval_genome(genome, config):
@@ -43,6 +41,19 @@ def eval_genome(genome, config):
         prediction = output.index(max(output))
         correct += 1 if prediction == yi else 0
     genome.fitness = correct / total
+
+
+def eval_genome_async(genome, config, xy=None, total=None):
+    net = neat.nn.FeedForwardNetwork.create(genome, config)
+    correct = 0
+    for xi, yi in xy:
+        output = net.activate(xi)
+        if max(output) == min(output):
+            correct = 0
+            break
+        prediction = output.index(max(output))
+        correct += 1 if prediction == yi else 0
+    return correct / total
 
 
 def prep_dataset():
@@ -96,6 +107,7 @@ class Classifier:
 
 
 def run():
+    global evaluator
     prep_dataset()
 
     config = neat.Config(neat.DefaultGenome, neat.DefaultReproduction,
@@ -116,6 +128,8 @@ def run():
 
     if MULTITHREADING:
         print(f'### Using {os.cpu_count()} cpu cores for multithreading')
+        evaluator = neat.parallel.ParallelEvaluator(num_workers=os.cpu_count(),
+                                                    eval_function=partial(eval_genome_async, xy=xy, total=total))
         winner = p.run(eval_genomes_async, NUM_GENERATIONS)
     else:
         winner = p.run(eval_genomes, NUM_GENERATIONS)
