@@ -1,19 +1,24 @@
 import os
 import time
 from functools import partial
+import numpy as np
+import pickle
 
-import neat                        # pip install neat-python
-import mnist                       # pip install mnist
-from sklearn.utils import shuffle  # pip install scikit-learn
+import neat                                 # pip install neat-python
+import mnist                                # pip install mnist
+from sklearn.utils import shuffle           # pip install scikit-learn
 import matplotlib
-import matplotlib.pyplot as plt    # pip install matplotlib
+import matplotlib.pyplot as plt             # pip install matplotlib
+import skimage as ski                       # pip install scikit-image
+from scipy.ndimage import affine_transform  # pip install scipy
 
 ##### SETTINGS #####
 MULTITHREADING: bool = True          # *can* increase speed but will use all cores by default!
-NUM_GENERATIONS: int = 4096          # maximum number of generations to run, if target fitness is not reached before
+NUM_GENERATIONS: int = 2000          # maximum number of generations to run, if target fitness is not reached before
 NUM_SAMPLES: int = 2000              # how many images to test each network on
 RESAMPLE: bool = False               # whether to resample NUM_SAMPLES items from the dataset every generation
 CONFIG_FILEPATH: str = 'config.cfg'  # relative to cwd
+PROCESS: bool = True                 # make the images 16x16 and deskew
 ####################
 
 
@@ -57,12 +62,63 @@ def eval_genome_async(genome, config, xy=None, total=None):
 
 
 def prep_dataset():
+    def moments(image):
+        c0, c1 = np.mgrid[:image.shape[0], :image.shape[1]]  # A trick in numPy to create a mesh grid
+        totalImage = np.sum(image)  # sum of pixels
+        m0 = np.sum(c0 * image) / totalImage  # mu_x
+        m1 = np.sum(c1 * image) / totalImage  # mu_y
+        m00 = np.sum((c0 - m0) ** 2 * image) / totalImage  # var(x)
+        m11 = np.sum((c1 - m1) ** 2 * image) / totalImage  # var(y)
+        m01 = np.sum((c0 - m0) * (c1 - m1) * image) / totalImage  # covariance(x,y)
+        mu_vector = np.array([m0, m1])  # Notice that these are \mu_x, \mu_y respectively
+        covariance_matrix = np.array([[m00, m01], [m01, m11]])  # Do you see a similarity between the covariance matrix
+        return mu_vector, covariance_matrix
+
+    def deskew(image):
+        c, v = moments(image)
+        alpha = v[0, 1] / v[0, 0]
+        affine = np.array([[1, 0], [alpha, 1]])
+        ocenter = np.array(image.shape) / 2.0
+        offset = c - np.dot(affine, ocenter)
+        img = affine_transform(image, affine, offset=offset)
+        return (img - img.min(initial=0)) / (img.max(initial=1) - img.min(initial=0))
+
     global xy, total
     x, y = shuffle(mnist.test_images(), mnist.test_labels(), n_samples=NUM_SAMPLES)
     total = len(y)
     xy = []
     for xi, yi in zip(x, y):
+        if PROCESS:
+            xi = ski.transform.resize(deskew(xi), (16, 16), preserve_range=True, anti_aliasing=False)
         xy.append((xi.flatten(), yi))
+
+
+def plot_stats(statistics, ylog=False, view=False, filename='avg_fitness.svg'):
+    """ Plots the population's average and best fitness. """
+    matplotlib.use('TkAgg')  # temp fix for Pycharm
+    generation = list(range(len(statistics.most_fit_genomes)))
+    best_fitness = [c.fitness for c in statistics.most_fit_genomes]
+    avg_fitness = np.array(statistics.get_fitness_mean())
+    stdev_fitness = np.array(statistics.get_fitness_stdev())
+
+    plt.plot(generation, avg_fitness, 'b-', label="average")
+    plt.plot(generation, avg_fitness - stdev_fitness, 'g-.', label="-1 sd")
+    plt.plot(generation, avg_fitness + stdev_fitness, 'g-.', label="+1 sd")
+    plt.plot(generation, best_fitness, 'r-', label="best")
+
+    plt.title("Population's average and best fitness")
+    plt.xlabel("Generations")
+    plt.ylabel("Fitness")
+    plt.grid()
+    plt.legend(loc="best")
+    if ylog:
+        plt.gca().set_yscale('symlog')
+
+    plt.savefig(filename)
+    if view:
+        plt.show()
+
+    plt.close()
 
 
 def plot_mnist(x, y, pred=None, cols=5):
@@ -136,6 +192,13 @@ def run():
 
     checkpointer.save_checkpoint(config, p, neat.DefaultSpeciesSet, p.generation)
 
+    with open('_winner.pkl', 'wb') as file:
+        pickle.dump(winner, file)
+    with open('_stats.pkl', 'wb') as file:
+        pickle.dump(stats, file)
+
+    plot_stats(stats)
+
     print('\nBest genome:\n{!s}'.format(winner))
 
     # Show output of the most fit genome against test data.
@@ -147,7 +210,7 @@ def run():
         y.append(yi)
         output = winner_clf(xi)
         print("expected output {!r}, got {!r}".format(yi, output))
-    plot_mnist(x, y, winner_clf(x))
+    # plot_mnist(x, y, winner_clf(x))
 
 
 if __name__ == '__main__':
