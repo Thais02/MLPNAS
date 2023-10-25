@@ -89,6 +89,7 @@ def prep_dataset():
     xy = []
     for xi, yi in zip(x, y):
         if PROCESS:
+            xi = xi / 255
             xi = ski.transform.resize(deskew(xi), (16, 16), preserve_range=True, anti_aliasing=False)
         xy.append((xi.flatten(), yi))
 
