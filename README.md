@@ -6,3 +6,7 @@
 `pip install scikit-learn`
 
 `pip install matplotlib`
+
+`pip install scikit-image`
+
+`pip install scipy`
